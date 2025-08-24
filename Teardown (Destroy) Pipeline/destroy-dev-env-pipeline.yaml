@@ -1,0 +1,34 @@
+trigger: none
+parameters:
+  - name: devUser
+    displayName: 'Developer Email'
+    type: string
+stages:
+- stage: RequestApproval
+  jobs:
+  - job: Approval
+    pool: server
+    steps:
+    - task: ManualValidation@0
+      inputs:
+        notifyUsers: 'admin@company.com'
+        instructions: 'Approve to destroy the dev environment for $(devUser)'
+- stage: Destroy
+  dependsOn: RequestApproval
+  condition: succeeded()
+  jobs:
+  - job: TerraformDestroy
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+    - task: AzureKeyVault@2
+      inputs:
+        connectedServiceName: 'AzureServiceConnection'
+        keyVaultName: 'kv-devops-secrets'
+        secretsFilter: '*'
+    - script: |
+        cd infra
+        terraform init -backend-config="storage_account_name=yourstorageaccount container_name=tfstate key=dev-env.tfstate"
+        terraform destroy -auto-approve -var="resource_group_name=dev-rg" -var="location=westeurope" -var="admin_username=devadmin" -var="admin_password=$(ADMIN_PASSWORD)" -var="tenant_id=$(TENANT_ID)" -var="dev_user_object_id=$(DEV_USER_OBJECT_ID)" -var="tags={owner=$(devUser),env=dev,expiration=$(date -d '+7 days' +%Y-%m-%d)}"
+      displayName: 'Terraform Destroy'
